@@ -309,6 +309,7 @@ def save_model(args, epoch, model_without_ddp, optimizer, loss_scaler, fname=Non
 def load_model(args, model_without_ddp, optimizer, loss_scaler):
     args.start_epoch = 0
     best_so_far = None
+    best_pose_ate_sofar = None
     if args.resume is not None:
         if args.resume.startswith('https'):
             checkpoint = torch.hub.load_state_dict_from_url(
