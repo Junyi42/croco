@@ -325,8 +325,13 @@ def load_model(args, model_without_ddp, optimizer, loss_scaler):
             print(" & best_so_far={:g}".format(best_so_far))
         else:
             print("")
+        if 'best_pose_ate_sofar' in checkpoint:
+            best_pose_ate_sofar = checkpoint['best_pose_ate_sofar']
+            print(" & best_pose_ate_sofar={:g}".format(best_pose_ate_sofar))
+        else:
+            best_pose_ate_sofar = None
         print("With optim & sched! start_epoch={:d}".format(args.start_epoch), end='')
-    return best_so_far
+    return best_so_far, best_pose_ate_sofar
 
 def all_reduce_mean(x):
     world_size = get_world_size()
