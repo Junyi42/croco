@@ -209,7 +209,7 @@ class PositionGetter(object):
 class PatchEmbed(nn.Module):
     """ just adding _init_weights + position getter compared to timm.models.layers.patch_embed.PatchEmbed"""
 
-    def __init__(self, img_size=224, patch_size=16, in_chans=3, embed_dim=768, norm_layer=None, flatten=True):
+    def __init__(self, img_size=224, patch_size=16, in_chans=3, embed_dim=768, norm_layer=None, flatten=True, init='xavier'):
         super().__init__()
         img_size = to_2tuple(img_size)
         patch_size = to_2tuple(patch_size)
@@ -223,6 +223,7 @@ class PatchEmbed(nn.Module):
         self.norm = norm_layer(embed_dim) if norm_layer else nn.Identity()
         
         self.position_getter = PositionGetter()
+        self.init_type = init
         
     def forward(self, x):
         B, C, H, W = x.shape
@@ -237,5 +238,15 @@ class PatchEmbed(nn.Module):
         
     def _init_weights(self):
         w = self.proj.weight.data
-        torch.nn.init.xavier_uniform_(w.view([w.shape[0], -1])) 
+        if self.init_type == 'xavier':
+            torch.nn.init.xavier_uniform_(w.view([w.shape[0], -1]))
+        elif self.init_type == 'kaiming':
+            torch.nn.init.kaiming_uniform_(w.view([w.shape[0], -1]))
+        elif self.init_type == 'zero':
+            torch.nn.init.zeros_(w)
+            bias = getattr(self.proj, 'bias', None)
+            if bias is not None:
+                torch.nn.init.zeros_(bias)
+        else:
+            raise ValueError(f"Unknown init type {self.init_type}")
 
