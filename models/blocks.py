@@ -111,6 +111,78 @@ class Attention(nn.Module):
         x = self.proj_drop(x)
         return x
 
+class LoRA_Attention(nn.Module):
+    def __init__(
+        self, dim, num_heads=8, qkv_bias=False, attn_drop=0.0, proj_drop=0.0,
+        r=4, alpha=1.0, rope=None
+    ):
+        super().__init__()
+        self.num_heads = num_heads
+        self.rope = rope
+        head_dim = dim // num_heads
+        self.scale = head_dim ** -0.5
+
+        # Original projections
+        self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
+
+        # LoRA parameters for Q and V
+        self.r = r
+        self.alpha = alpha
+
+        if r > 0:
+            self.lora_q_A = nn.Linear(dim, r, bias=False)
+            self.lora_q_B = nn.Linear(r, dim, bias=False)
+            self.scaling = self.alpha / self.r
+
+            self.lora_v_A = nn.Linear(dim, r, bias=False)
+            self.lora_v_B = nn.Linear(r, dim, bias=False)
+        else:
+            # If r=0, no adaptation is applied
+            self.lora_q_A = None
+            self.lora_q_B = None
+            self.lora_v_A = None
+            self.lora_v_B = None
+
+        self.attn_drop = nn.Dropout(attn_drop)
+        self.proj = nn.Linear(dim, dim)
+        self.proj_drop = nn.Dropout(proj_drop)
+
+    def forward(self, x, xpos):
+        B, N, C = x.shape
+
+        # Original QKV computation
+        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads)
+        qkv = qkv.permute(2, 0, 3, 1, 4)  # (3, B, num_heads, N, head_dim)
+        q, k, v = qkv[0], qkv[1], qkv[2]
+
+        # LoRA adjustments for Q and V
+        if self.r > 0:
+            # Compute LoRA for Q
+            lora_q = self.lora_q_B(self.lora_q_A(x))
+            lora_q = lora_q.reshape(B, N, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
+            q = q + self.scaling * lora_q
+
+            # Compute LoRA for V
+            lora_v = self.lora_v_B(self.lora_v_A(x))
+            lora_v = lora_v.reshape(B, N, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
+            v = v + self.scaling * lora_v
+
+        # Apply RoPE if available
+        if self.rope is not None:
+            q = self.rope(q, xpos)
+            k = self.rope(k, xpos)
+
+        # Attention computation
+        attn = (q @ k.transpose(-2, -1)) * self.scale
+        attn = attn.softmax(dim=-1)
+        attn = self.attn_drop(attn)
+
+        # Compute output
+        x = (attn @ v).transpose(1, 2).reshape(B, N, C)
+        x = self.proj(x)
+        x = self.proj_drop(x)
+        return x
+
 class Block(nn.Module):
 
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, drop=0., attn_drop=0.,
@@ -168,6 +240,83 @@ class CrossAttention(nn.Module):
         x = self.proj_drop(x)
         return x
 
+class LoRA_CrossAttention(nn.Module):
+    def __init__(
+        self, dim, num_heads=8, qkv_bias=False, attn_drop=0.0, proj_drop=0.0,
+        r=4, alpha=1.0, rope=None
+    ):
+        super().__init__()
+        self.num_heads = num_heads
+        self.rope = rope
+        head_dim = dim // num_heads
+        self.scale = head_dim ** -0.5
+
+        # Original projections
+        self.proj_q = nn.Linear(dim, dim, bias=qkv_bias)
+        self.proj_k = nn.Linear(dim, dim, bias=qkv_bias)
+        self.proj_v = nn.Linear(dim, dim, bias=qkv_bias)
+
+        # LoRA parameters for Q and V
+        self.r = r
+        self.alpha = alpha
+
+        if r > 0:
+            self.lora_q_A = nn.Linear(dim, r, bias=False)
+            self.lora_q_B = nn.Linear(r, dim, bias=False)
+            self.scaling = self.alpha / self.r
+
+            self.lora_v_A = nn.Linear(dim, r, bias=False)
+            self.lora_v_B = nn.Linear(r, dim, bias=False)
+        else:
+            self.lora_q_A = None
+            self.lora_q_B = None
+            self.lora_v_A = None
+            self.lora_v_B = None
+
+        self.attn_drop = nn.Dropout(attn_drop)
+        self.proj = nn.Linear(dim, dim)
+        self.proj_drop = nn.Dropout(proj_drop)
+
+    def forward(self, query, key, value, qpos, kpos):
+        B, Nq, C = query.shape
+        Nk = key.shape[1]
+
+        # Original projections
+        q = self.proj_q(query)
+        k = self.proj_k(key)
+        v = self.proj_v(value)
+
+        # LoRA adjustments for Q and V
+        if self.r > 0:
+            # Compute LoRA for Q
+            lora_q = self.lora_q_B(self.lora_q_A(query))
+            q = q + self.scaling * lora_q
+
+            # Compute LoRA for V
+            lora_v = self.lora_v_B(self.lora_v_A(value))
+            v = v + self.scaling * lora_v
+
+        # Reshape for multi-head attention
+        q = q.reshape(B, Nq, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
+        k = k.reshape(B, Nk, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
+        v = v.reshape(B, Nk, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
+
+        # Apply RoPE if available
+        if self.rope is not None:
+            q = self.rope(q, qpos)
+            k = self.rope(k, kpos)
+
+        # Attention computation
+        attn = (q @ k.transpose(-2, -1)) * self.scale
+        attn = attn.softmax(dim=-1)
+        attn = self.attn_drop(attn)
+
+        # Compute output
+        x = (attn @ v).transpose(1, 2).reshape(B, Nq, C)
+        x = self.proj(x)
+        x = self.proj_drop(x)
+        return x
+
 class DecoderBlock(nn.Module):
 
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, drop=0., attn_drop=0.,
@@ -190,7 +339,40 @@ class DecoderBlock(nn.Module):
         x = x + self.drop_path(self.mlp(self.norm3(x)))
         return x, y
         
-        
+class LoRA_DecoderBlock(nn.Module):
+    def __init__(
+        self, dim, num_heads, mlp_ratio=4.0, qkv_bias=False, drop=0.0, attn_drop=0.0,
+        drop_path=0.0, act_layer=nn.GELU, norm_layer=nn.LayerNorm, norm_mem=True,
+        r=4, alpha=1.0, rope=None
+    ):
+        super().__init__()
+        self.norm1 = norm_layer(dim)
+        self.attn = LoRA_Attention(
+            dim, num_heads=num_heads, qkv_bias=qkv_bias,
+            attn_drop=attn_drop, proj_drop=drop, r=r, alpha=alpha, rope=rope
+        )
+        self.cross_attn = LoRA_CrossAttention(
+            dim, num_heads=num_heads, qkv_bias=qkv_bias,
+            attn_drop=attn_drop, proj_drop=drop, r=r, alpha=alpha, rope=rope
+        )
+        self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
+        self.norm2 = norm_layer(dim)
+        self.norm3 = norm_layer(dim)
+        mlp_hidden_dim = int(dim * mlp_ratio)
+        self.mlp = Mlp(
+            in_features=dim, hidden_features=mlp_hidden_dim,
+            act_layer=act_layer, drop=drop
+        )
+        self.norm_y = norm_layer(dim) if norm_mem else nn.Identity()
+
+    def forward(self, x, y, xpos, ypos):
+        x = x + self.drop_path(self.attn(self.norm1(x), xpos))
+        y_ = self.norm_y(y)
+        x = x + self.drop_path(self.cross_attn(self.norm2(x), y_, y_, xpos, ypos))
+        x = x + self.drop_path(self.mlp(self.norm3(x)))
+        return x, y
+
+
 # patch embedding
 class PositionGetter(object):
     """ return positions of patches """

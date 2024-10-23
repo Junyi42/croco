@@ -408,32 +408,39 @@ def get_parameter_groups(model, weight_decay, layer_decay=1.0, skip_list=(), no_
         if not param.requires_grad:
             continue  # frozen weights
 
-        # Assign weight decay values
-        if len(param.shape) == 1 or name.endswith(".bias") or name in skip_list:
-            group_name = "no_decay"
-            this_weight_decay = 0.
+        # Optionally skip LoRA parameters from layer-wise decay or apply different settings
+        if 'lora' in name.lower():
+            group_name = 'lora'
+            this_weight_decay = 0.0  # Typically, no weight decay on LoRA parameters
+            scale = 1.0  # You might choose to have a different learning rate for LoRA parameters
         else:
-            group_name = "decay"
-            this_weight_decay = weight_decay
+            # Existing logic for base model parameters
+            # Assign weight decay values
+            if len(param.shape) == 1 or name.endswith(".bias") or name in skip_list:
+                group_name = "no_decay"
+                this_weight_decay = 0.
+            else:
+                group_name = "decay"
+                this_weight_decay = weight_decay
 
-        # Assign layer ID for LR scaling
-        if layer_decay<1.:
-            skip_scale = False
-            layer_id = _get_num_layer_for_vit(name, enc_depth, dec_depth)
-            group_name = "layer_%d_%s" % (layer_id, group_name)
-            if name in no_lr_scale_list:
+            # Assign layer ID for LR scaling
+            if layer_decay<1.:
+                skip_scale = False
+                layer_id = _get_num_layer_for_vit(name, enc_depth, dec_depth)
+                group_name = "layer_%d_%s" % (layer_id, group_name)
+                if name in no_lr_scale_list:
+                    skip_scale = True
+                    group_name = f'{group_name}_no_lr_scale'
+            else:
+                layer_id = 0
                 skip_scale = True
-                group_name = f'{group_name}_no_lr_scale'
-        else:
-            layer_id = 0
-            skip_scale = True
 
-        if group_name not in parameter_group_names:
             if not skip_scale:
                 scale = layer_decay_values[layer_id]
             else:
                 scale = 1.
 
+        if group_name not in parameter_group_names:
             parameter_group_names[group_name] = {
                 "weight_decay": this_weight_decay,
                 "params": [],
@@ -447,8 +454,10 @@ def get_parameter_groups(model, weight_decay, layer_decay=1.0, skip_list=(), no_
 
         parameter_group_vars[group_name]["params"].append(param)
         parameter_group_names[group_name]["params"].append(name)
+
     print("Param groups = %s" % json.dumps(parameter_group_names, indent=2))
     return list(parameter_group_vars.values())
+
 
 
 
