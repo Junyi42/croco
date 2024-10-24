@@ -337,6 +337,10 @@ def load_model(args, model_without_ddp, optimizer, loss_scaler):
         else:
             best_pose_ate_sofar = None
         print("With optim & sched! start_epoch={:d}".format(args.start_epoch), end='')
+
+        if args.load_lora is not None:
+            model_without_ddp.load_lora_parameters(args.load_lora)
+            print(f' & LoRA parameters loaded from {args.load_lora}')
     return best_so_far, best_pose_ate_sofar
 
 def all_reduce_mean(x):
