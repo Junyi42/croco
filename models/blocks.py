@@ -252,9 +252,9 @@ class LoRA_CrossAttention(nn.Module):
         self.scale = head_dim ** -0.5
 
         # Original projections
-        self.proj_q = nn.Linear(dim, dim, bias=qkv_bias)
-        self.proj_k = nn.Linear(dim, dim, bias=qkv_bias)
-        self.proj_v = nn.Linear(dim, dim, bias=qkv_bias)
+        self.projq = nn.Linear(dim, dim, bias=qkv_bias)
+        self.projk = nn.Linear(dim, dim, bias=qkv_bias)
+        self.projv = nn.Linear(dim, dim, bias=qkv_bias)
 
         # LoRA parameters for Q and V
         self.r = r
@@ -282,9 +282,9 @@ class LoRA_CrossAttention(nn.Module):
         Nk = key.shape[1]
 
         # Original projections
-        q = self.proj_q(query)
-        k = self.proj_k(key)
-        v = self.proj_v(value)
+        q = self.projq(query)
+        k = self.projk(key)
+        v = self.projv(value)
 
         # LoRA adjustments for Q and V
         if self.r > 0:
