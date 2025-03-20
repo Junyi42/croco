@@ -304,7 +304,7 @@ def save_model(args, epoch, model_without_ddp, optimizer, loss_scaler, fname=Non
     if best_pose_ate_sofar is not None: to_save['best_pose_ate_sofar'] = best_pose_ate_sofar
     print(f'>> Saving model to {checkpoint_path} ...')
     save_on_master(to_save, checkpoint_path)
-    if args.lora:
+    if getattr(args, 'lora', False):
         lora_path = output_dir / ('lora-%s.pth' % fname)
         print(f'>> Saving LoRA to {lora_path} ...')
         model_without_ddp.save_lora_parameters(lora_path)
@@ -338,7 +338,7 @@ def load_model(args, model_without_ddp, optimizer, loss_scaler):
             best_pose_ate_sofar = None
         print("With optim & sched! start_epoch={:d}".format(args.start_epoch), end='')
 
-        if args.load_lora is not None:
+        if getattr(args, 'load_lora', False):
             model_without_ddp.load_lora_parameters(args.load_lora)
             print(f' & LoRA parameters loaded from {args.load_lora}')
     return best_so_far, best_pose_ate_sofar
