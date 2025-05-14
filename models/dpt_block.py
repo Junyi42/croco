@@ -247,19 +247,41 @@ class Interpolate(nn.Module):
     def forward(self, x):
         """Forward pass.
         Args:
-            x (tensor): input
+            x (tensor): input (B, C, H, W)
         Returns:
             tensor: interpolated data
         """
 
-        x = self.interp(
-            x,
-            scale_factor=self.scale_factor,
-            mode=self.mode,
-            align_corners=self.align_corners,
-        )
+        # if number of elements exceeds INT_MAX, split into smaller chunks
+        # print(x.numel(), 'numel')
+        if x.shape[0] >= 64:
+            batch_size = x.size(0)
+            chunk_size = 32  # You can adjust this chunk size depending on your memory capacity
+            chunks = []
 
+            # Split into smaller chunks along the batch dimension
+            for i in range(0, batch_size, chunk_size):
+                chunk = x[i:i+chunk_size]
+                # Perform interpolation on each chunk
+                chunks.append(self.interp(
+                    chunk,
+                    scale_factor=self.scale_factor,
+                    mode=self.mode,
+                    align_corners=self.align_corners,
+                ))
+
+            # Concatenate the chunks back together
+            x = torch.cat(chunks, dim=0)
+        else:
+            x = self.interp(
+                x,
+                scale_factor=self.scale_factor,
+                mode=self.mode,
+                align_corners=self.align_corners,
+            )
+        
         return x
+
 
 class DPTOutputAdapter(nn.Module):
     """DPT output adapter.
